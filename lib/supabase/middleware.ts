@@ -29,9 +29,24 @@ export async function updateSession(request: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-        const { error } = await supabase.auth.signInAnonymously()
-        if (error) {
-            console.error('Anonymous sign-in error:', error)
+        const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously()
+        if (!signInError && signInData.user) {
+            // Wait for the session to be set
+            await new Promise((resolve) => setTimeout(resolve, 100))
+
+            // Create user profile
+            const { error: insertError } = await supabase
+                .from('users')
+                .insert({
+                    id: signInData.user.id,
+                    display_name: `Anonymous User ${Math.floor(Math.random() * 1000)}`,
+                    is_admin: false,
+                })
+            if (insertError) {
+                console.error('Error creating user profile:', insertError)
+            }
+        } else if (signInError) {
+            console.error('Anonymous sign-in error:', signInError)
         }
     }
 

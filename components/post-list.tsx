@@ -10,20 +10,35 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Smile } from "lucide-react";
+import { Smile, Trash } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 type Post = Database["public"]["Tables"]["posts"]["Row"];
 type Reaction = Database["public"]["Tables"]["reactions"]["Row"];
+type User = Database["public"]["Tables"]["users"]["Row"];
 
 const EMOJI_OPTIONS = ["👍", "❤️", "😄", "🎉", "🤔", "👀"];
 
 export function PostList() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [reactions, setReactions] = useState<Reaction[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const supabase = createClient();
 
   useEffect(() => {
+    // Get current user
+    const fetchCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: userData } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .single();
+        setCurrentUser(userData);
+      }
+    };
+
     // Fetch initial posts
     const fetchPosts = async () => {
       const { data: postsData } = await supabase
@@ -41,6 +56,7 @@ export function PostList() {
       if (reactionsData) setReactions(reactionsData);
     };
 
+    fetchCurrentUser();
     fetchPosts();
     fetchReactions();
 
@@ -81,15 +97,12 @@ export function PostList() {
   }, [supabase]);
 
   const handleReaction = async (postId: string, reactionType: string) => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!currentUser) return;
 
     const existingReaction = reactions.find(
       (r) =>
         r.post_id === postId &&
-        r.user_id === user.id &&
+        r.user_id === currentUser.id &&
         r.reaction_type === reactionType
     );
 
@@ -101,9 +114,27 @@ export function PostList() {
     } else {
       await supabase.from("reactions").insert({
         post_id: postId,
-        user_id: user.id,
+        user_id: currentUser.id,
         reaction_type: reactionType,
       });
+    }
+  };
+
+  const handleDelete = async (postId: string) => {
+    if (!currentUser) return;
+    
+    const post = posts.find(p => p.id === postId);
+    if (!post) return;
+
+    if (!currentUser.is_admin && post.user_id !== currentUser.id) return;
+
+    const { error } = await supabase
+      .from("posts")
+      .delete()
+      .match({ id: postId });
+
+    if (!error) {
+      setPosts(posts.filter(p => p.id !== postId));
     }
   };
 
@@ -128,13 +159,31 @@ export function PostList() {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
+  const canModifyPost = (post: Post) => {
+    if (!currentUser) return false;
+    return currentUser.is_admin || post.user_id === currentUser.id;
+  };
+
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
       {sortedPosts.map((post) => (
         <Card key={post.id}>
           <CardHeader>
-            <div className="text-sm text-muted-foreground">
-              {new Date(post.created_at).toLocaleString()}
+            <div className="flex justify-between items-center">
+              <div className="text-sm text-muted-foreground">
+                {new Date(post.created_at).toLocaleString()}
+              </div>
+              {canModifyPost(post) && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDelete(post.id)}
+                  >
+                    <Trash className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           </CardHeader>
           <CardContent>

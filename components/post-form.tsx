@@ -17,8 +17,11 @@ import {
   ToastTitle,
   ToastViewport,
 } from '@/components/ui/toast';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { Database } from '@/lib/supabase/types';
+
+type User = Database['public']['Tables']['users']['Row'];
 
 const formSchema = z.object({
   content: z
@@ -35,7 +38,46 @@ export function PostForm() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [isError, setIsError] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const supabase = createClient();
+
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) {
+          const { error: signInError } = await supabase.auth.signInAnonymously();
+          if (signInError) throw signInError;
+          
+          // Wait for the session to be set
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          const { data: { user: newUser } } = await supabase.auth.getUser();
+          if (!newUser) throw new Error('Failed to get user after sign in');
+          
+          const { data: userData } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', newUser.id)
+            .single();
+          setCurrentUser(userData);
+        } else {
+          const { data: userData } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+          setCurrentUser(userData);
+        }
+      } catch (error) {
+        console.error('Error fetching user:', error);
+        setToastMessage('ユーザー情報の取得に失敗しました。再度お試しください。');
+        setIsError(true);
+        setShowToast(true);
+      }
+    };
+
+    fetchCurrentUser();
+  }, []);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -45,28 +87,14 @@ export function PostForm() {
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
+    if (!currentUser) {
+      setToastMessage('ユーザー情報の取得に失敗しました。再度お試しください。');
+      setIsError(true);
+      setShowToast(true);
+      return;
+    }
+
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      let currentUser;
-
-      // セッションがない場合は匿名サインイン
-      if (!session || sessionError) {
-        const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously();
-        if (signInError) throw new Error('匿名サインインに失敗しました: ' + signInError.message);
-        
-        currentUser = signInData.user;
-        if (!currentUser) throw new Error('匿名サインイン後のユーザー情報が見つかりません');
-      } else {
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) throw new Error('ユーザー情報の取得に失敗しました: ' + (userError ? userError.message : 'ユーザーが見つかりません'));
-        currentUser = user;
-      }
-
-      // 投稿を作成
       const { error: insertError } = await supabase.from('posts').insert({
         content: values.content,
         user_id: currentUser.id,
