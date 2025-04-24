@@ -113,9 +113,24 @@ export function PostList() {
     ).length;
   };
 
+  const getTotalReactionCount = (postId: string) => {
+    return reactions.filter((r) => r.post_id === postId).length;
+  };
+
+  // 投稿をリアクション数で並び替え
+  const sortedPosts = [...posts].sort((a, b) => {
+    const aCount = getTotalReactionCount(a.id);
+    const bCount = getTotalReactionCount(b.id);
+    if (bCount !== aCount) {
+      return bCount - aCount; // リアクション数の降順
+    }
+    // リアクション数が同じ場合は投稿日時の降順
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
   return (
     <div className="space-y-4 max-w-2xl mx-auto">
-      {posts.map((post) => (
+      {sortedPosts.map((post) => (
         <Card key={post.id}>
           <CardHeader>
             <div className="text-sm text-muted-foreground">

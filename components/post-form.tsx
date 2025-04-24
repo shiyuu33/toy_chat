@@ -51,26 +51,25 @@ export function PostForm() {
         error: sessionError,
       } = await supabase.auth.getSession();
 
+      let currentUser;
+
       // セッションがない場合は匿名サインイン
       if (!session || sessionError) {
-        const { error: signInError } = await supabase.auth.signInAnonymously();
+        const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously();
         if (signInError) throw new Error('匿名サインインに失敗しました: ' + signInError.message);
-
-        // サインイン直後なので少し待機（セッションの設定を待つ）
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        
+        currentUser = signInData.user;
+        if (!currentUser) throw new Error('匿名サインイン後のユーザー情報が見つかりません');
+      } else {
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError || !user) throw new Error('ユーザー情報の取得に失敗しました: ' + (userError ? userError.message : 'ユーザーが見つかりません'));
+        currentUser = user;
       }
 
-      // 再度ユーザー情報を取得
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !user) throw new Error('ユーザー情報の取得に失敗しました');
-
-      // 認証済みユーザーの場合
+      // 投稿を作成
       const { error: insertError } = await supabase.from('posts').insert({
         content: values.content,
-        user_id: user.id,
+        user_id: currentUser.id,
       });
 
       if (insertError) throw insertError;
