@@ -45,28 +45,67 @@ export function PostForm() {
     const fetchCurrentUser = async () => {
       try {
         const { data: { user }, error: authError } = await supabase.auth.getUser();
+        
         if (authError || !user) {
-          const { error: signInError } = await supabase.auth.signInAnonymously();
+          // Sign in anonymously if no user exists
+          const { data: signInData, error: signInError } = await supabase.auth.signInAnonymously();
           if (signInError) throw signInError;
-          
-          // Wait for the session to be set
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          const { data: { user: newUser } } = await supabase.auth.getUser();
-          if (!newUser) throw new Error('Failed to get user after sign in');
-          
-          const { data: userData } = await supabase
+          if (!signInData.user) throw new Error('Failed to sign in anonymously');
+
+          // Create a new user record in the users table
+          const { data: newUserData, error: insertError } = await supabase
             .from('users')
-            .select('*')
-            .eq('id', newUser.id)
-            .single();
-          setCurrentUser(userData);
+            .insert({
+              id: signInData.user.id,
+              display_name: `Anonymous User ${Math.floor(Math.random() * 1000)}`,
+            })
+            .select()
+            .maybeSingle();
+
+          if (insertError) {
+            // If insert fails, try to fetch existing user
+            const { data: existingUser, error: fetchError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('id', signInData.user.id)
+              .maybeSingle();
+
+            if (fetchError) throw fetchError;
+            if (existingUser) {
+              setCurrentUser(existingUser);
+            } else {
+              throw new Error('Failed to create or fetch user');
+            }
+          } else if (newUserData) {
+            setCurrentUser(newUserData);
+          }
         } else {
-          const { data: userData } = await supabase
+          // Fetch existing user data
+          const { data: userData, error: fetchError } = await supabase
             .from('users')
             .select('*')
             .eq('id', user.id)
-            .single();
-          setCurrentUser(userData);
+            .maybeSingle();
+
+          if (fetchError) throw fetchError;
+          if (userData) {
+            setCurrentUser(userData);
+          } else {
+            // Create user profile if it doesn't exist
+            const { data: newUserData, error: insertError } = await supabase
+              .from('users')
+              .insert({
+                id: user.id,
+                display_name: `Anonymous User ${Math.floor(Math.random() * 1000)}`,
+              })
+              .select()
+              .maybeSingle();
+
+            if (insertError) throw insertError;
+            if (newUserData) {
+              setCurrentUser(newUserData);
+            }
+          }
         }
       } catch (error) {
         console.error('Error fetching user:', error);

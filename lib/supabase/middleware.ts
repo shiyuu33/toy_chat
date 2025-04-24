@@ -40,8 +40,10 @@ export async function updateSession(request: NextRequest) {
                 .insert({
                     id: signInData.user.id,
                     display_name: `Anonymous User ${Math.floor(Math.random() * 1000)}`,
-                    is_admin: false,
                 })
+                .select()
+                .maybeSingle()
+
             if (insertError) {
                 console.error('Error creating user profile:', insertError)
             }
