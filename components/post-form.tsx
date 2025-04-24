@@ -1,14 +1,14 @@
-"use client"
+'use client';
 
-import { zodResolver } from "@hookform/resolvers/zod"
-import { useForm } from "react-hook-form"
-import * as z from "zod"
-import ReactMarkdown from "react-markdown"
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import * as z from 'zod';
+import ReactMarkdown from 'react-markdown';
 
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Toast,
   ToastClose,
@@ -16,44 +16,73 @@ import {
   ToastProvider,
   ToastTitle,
   ToastViewport,
-} from "@/components/ui/toast"
-import { useState } from "react"
+} from '@/components/ui/toast';
+import { useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 const formSchema = z.object({
   content: z
     .string()
     .min(1, {
-      message: "Content cannot be empty.",
+      message: 'Content cannot be empty.',
     })
     .max(1000, {
-      message: "Content cannot be longer than 1000 characters.",
+      message: 'Content cannot be longer than 1000 characters.',
     }),
-})
+});
 
 export function PostForm() {
-  const [showToast, setShowToast] = useState(false)
-  const [toastMessage, setToastMessage] = useState("")
-  const [isError, setIsError] = useState(false)
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isError, setIsError] = useState(false);
+  const supabase = createClient();
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      content: "",
+      content: '',
     },
-  })
+  });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     try {
-      // TODO: Implement Supabase integration
-      console.log(values)
-      setToastMessage("Post submitted successfully!")
-      setIsError(false)
-      setShowToast(true)
-      form.reset()
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      // セッションがない場合は匿名サインイン
+      if (!session || sessionError) {
+        const { error: signInError } = await supabase.auth.signInAnonymously();
+        if (signInError) throw new Error('匿名サインインに失敗しました: ' + signInError.message);
+
+        // サインイン直後なので少し待機（セッションの設定を待つ）
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+
+      // 再度ユーザー情報を取得
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) throw new Error('ユーザー情報の取得に失敗しました');
+
+      // 認証済みユーザーの場合
+      const { error: insertError } = await supabase.from('posts').insert({
+        content: values.content,
+        user_id: user.id,
+      });
+
+      if (insertError) throw insertError;
+      setToastMessage('投稿が完了しました！');
+      setIsError(false);
+      setShowToast(true);
+      form.reset();
     } catch (error) {
-      setToastMessage("Failed to submit post. Please try again.")
-      setIsError(true)
-      setShowToast(true)
+      console.error('投稿エラー:', error);
+      setToastMessage('投稿に失敗しました。再度試してください。');
+      setIsError(true);
+      setShowToast(true);
     }
   }
 
@@ -71,32 +100,27 @@ export function PostForm() {
               <Textarea
                 id="content"
                 placeholder="Write your post here... (Markdown supported)"
-                {...form.register("content")}
+                {...form.register('content')}
                 className="min-h-[200px]"
               />
             </TabsContent>
             <TabsContent value="preview" className="min-h-[200px] prose">
-              <ReactMarkdown>{form.watch("content") || "Nothing to preview"}</ReactMarkdown>
+              <ReactMarkdown>{form.watch('content') || '投稿内容がありません'}</ReactMarkdown>
             </TabsContent>
           </Tabs>
           {form.formState.errors.content && (
-            <p className="text-sm text-red-500">
-              {form.formState.errors.content.message}
-            </p>
+            <p className="text-sm text-red-500">{form.formState.errors.content.message}</p>
           )}
         </div>
         <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? "Posting..." : "Post"}
+          {form.formState.isSubmitting ? '投稿中...' : '投稿'}
         </Button>
       </form>
 
       <ToastProvider>
         {showToast && (
-          <Toast
-            variant={isError ? "destructive" : "default"}
-            onOpenChange={setShowToast}
-          >
-            <ToastTitle>{isError ? "Error" : "Success"}</ToastTitle>
+          <Toast variant={isError ? 'destructive' : 'default'} onOpenChange={setShowToast}>
+            <ToastTitle>{isError ? 'エラー' : '成功'}</ToastTitle>
             <ToastDescription>{toastMessage}</ToastDescription>
             <ToastClose />
           </Toast>
@@ -104,5 +128,5 @@ export function PostForm() {
         <ToastViewport />
       </ToastProvider>
     </div>
-  )
+  );
 }
